@@ -1,0 +1,44 @@
+{
+  "name": "electron-assembly-whisper-dual-transcription",
+  "version": "1.0.0",
+  "description": "Electron app for dual live transcription comparing Whisper and AssemblyAI side-by-side",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "rebuild": "electron-rebuild",
+    "build": "electron-builder",
+    "setup-python": "python3 -m venv venv && source venv/bin/activate && pip install -r requirements.txt",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [
+    "electron",
+    "whisper",
+    "assemblyai",
+    "transcription",
+    "live",
+    "dual-transcription",
+    "comparison",
+    "system-audio",
+    "macos"
+  ],
+  "author": "",
+  "license": "ISC",
+  "devDependencies": {
+    "electron": "^37.2.0",
+    "electron-builder": "^25.1.8",
+    "electron-rebuild": "^3.2.9",
+    "node-gyp": "^11.2.0"
+  },
+  "dependencies": {
+    "nan": "^2.22.2",
+    "python-shell": "^5.0.0",
+    "systeminformation": "^5.22.11",
+    "node-os-utils": "^1.3.7",
+    "pidusage": "^3.0.2",
+    "chart.js": "^4.4.0",
+    "ws": "^8.16.0",
+    "assemblyai": "^4.6.0",
+    "dotenv": "^16.4.5",
+    "fs-extra": "^11.2.0"
+  }
+}

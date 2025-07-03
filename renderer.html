@@ -1,0 +1,521 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Dual Transcription: Whisper vs AssemblyAI</title>
+  <style>
+    body { 
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      margin: 0;
+      padding: 20px;
+      background: #f5f5f5;
+      color: #333;
+    }
+    
+    .container {
+      max-width: 1200px;
+      margin: 0 auto;
+      display: grid;
+      grid-template-columns: 1fr 350px;
+      gap: 20px;
+      height: calc(100vh - 40px);
+    }
+    
+    .main-panel {
+      background: white;
+      border-radius: 8px;
+      padding: 20px;
+      box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+      display: flex;
+      flex-direction: column;
+    }
+    
+    .sidebar {
+      background: white;
+      border-radius: 8px;
+      padding: 20px;
+      box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+      overflow-y: auto;
+    }
+    
+    h1 {
+      margin: 0 0 20px 0;
+      color: #2c3e50;
+      font-size: 24px;
+    }
+    
+    .control-section {
+      margin-bottom: 20px;
+      padding: 15px;
+      background: #f8f9fa;
+      border-radius: 6px;
+    }
+    
+    .control-section h3 {
+      margin: 0 0 10px 0;
+      color: #495057;
+      font-size: 16px;
+    }
+    
+    .model-selection {
+      margin-bottom: 15px;
+    }
+    
+    select {
+      width: 100%;
+      padding: 8px 12px;
+      border: 1px solid #ddd;
+      border-radius: 4px;
+      font-size: 14px;
+      background: white;
+    }
+    
+    .model-info {
+      margin-top: 10px;
+      padding: 10px;
+      background: #e3f2fd;
+      border-radius: 4px;
+      font-size: 12px;
+      color: #1565c0;
+    }
+    
+    .controls {
+      display: flex;
+      gap: 10px;
+      margin-top: 15px;
+    }
+    
+    button {
+      padding: 10px 20px;
+      border: none;
+      border-radius: 4px;
+      font-size: 14px;
+      cursor: pointer;
+      transition: background-color 0.2s;
+    }
+    
+    .btn-primary {
+      background: #007bff;
+      color: white;
+    }
+    
+    .btn-primary:hover {
+      background: #0056b3;
+    }
+    
+    .btn-danger {
+      background: #dc3545;
+      color: white;
+    }
+    
+    .btn-danger:hover {
+      background: #c82333;
+    }
+    
+    .btn-secondary {
+      background: #6c757d;
+      color: white;
+    }
+    
+    .btn-secondary:hover {
+      background: #545b62;
+    }
+    
+    .btn-success {
+      background: #28a745;
+      color: white;
+    }
+    
+    .btn-success:hover {
+      background: #1e7e34;
+    }
+    
+    button:disabled {
+      opacity: 0.6;
+      cursor: not-allowed;
+    }
+    
+    .transcription-area {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      margin-top: 20px;
+    }
+    
+    .dual-transcription {
+      display: flex;
+      gap: 20px;
+      flex: 1;
+    }
+    
+    .transcription-panel {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      background: #f8f9fa;
+      border-radius: 8px;
+      padding: 15px;
+      border: 2px solid #e9ecef;
+    }
+    
+    .transcription-panel.whisper {
+      border-color: #007bff;
+    }
+    
+    .transcription-panel.assemblyai {
+      border-color: #28a745;
+    }
+    
+    .panel-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 15px;
+      padding-bottom: 10px;
+      border-bottom: 1px solid #dee2e6;
+    }
+    
+    .panel-title {
+      font-size: 16px;
+      font-weight: bold;
+      color: #495057;
+    }
+    
+    .panel-title.whisper {
+      color: #007bff;
+    }
+    
+    .panel-title.assemblyai {
+      color: #28a745;
+    }
+    
+    .panel-controls {
+      display: flex;
+      gap: 10px;
+      margin-bottom: 15px;
+    }
+    
+    .panel-status {
+      font-size: 12px;
+      padding: 4px 8px;
+      border-radius: 4px;
+      font-weight: bold;
+    }
+    
+    .panel-status.whisper {
+      background: #e3f2fd;
+      color: #1565c0;
+    }
+    
+    .panel-status.assemblyai {
+      background: #e8f5e8;
+      color: #2e7d32;
+    }
+    
+    .transcription-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 10px;
+    }
+    
+    .transcription-display {
+      flex: 1;
+      background: white;
+      border: 1px solid #dee2e6;
+      border-radius: 4px;
+      padding: 15px;
+      overflow-y: auto;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      font-size: 14px;
+      line-height: 1.6;
+      min-height: 250px;
+    }
+    
+    .transcription-entry {
+      margin-bottom: 10px;
+      padding: 8px;
+      background: white;
+      border-radius: 4px;
+      border-left: 3px solid #007bff;
+    }
+    
+    .transcription-timestamp {
+      font-size: 11px;
+      color: #6c757d;
+      margin-bottom: 4px;
+    }
+    
+    .transcription-text {
+      color: #333;
+    }
+    
+    .continuous-transcript {
+      color: #333;
+      line-height: 1.8;
+      font-size: 15px;
+      margin-bottom: 15px;
+      word-wrap: break-word;
+      text-align: left;
+    }
+    
+    .transcript-metadata {
+      border-top: 1px solid #e9ecef;
+      padding-top: 10px;
+      margin-top: 10px;
+    }
+    
+    .status-indicator {
+      padding: 4px 8px;
+      border-radius: 4px;
+      font-size: 12px;
+      font-weight: bold;
+    }
+    
+    .status-ready {
+      background: #d4edda;
+      color: #155724;
+    }
+    
+    .status-recording {
+      background: #f8d7da;
+      color: #721c24;
+      animation: pulse 2s infinite;
+    }
+    
+    .status-processing {
+      background: #fff3cd;
+      color: #856404;
+    }
+    
+    @keyframes pulse {
+      0% { opacity: 1; }
+      50% { opacity: 0.5; }
+      100% { opacity: 1; }
+    }
+    
+    .permissions-section {
+      margin-bottom: 15px;
+    }
+    
+    .permission-item {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 8px;
+      background: #f8f9fa;
+      border-radius: 4px;
+      margin-bottom: 5px;
+    }
+    
+    .permission-status {
+      padding: 2px 8px;
+      border-radius: 12px;
+      font-size: 11px;
+      font-weight: bold;
+    }
+    
+    .permission-granted {
+      background: #d4edda;
+      color: #155724;
+    }
+    
+    .permission-denied {
+      background: #f8d7da;
+      color: #721c24;
+    }
+    
+    .system-monitor {
+      margin-top: 20px;
+    }
+    
+    .monitor-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 10px;
+      margin-bottom: 15px;
+    }
+    
+    .monitor-item {
+      background: #f8f9fa;
+      padding: 12px;
+      border-radius: 4px;
+      text-align: center;
+    }
+    
+    .monitor-value {
+      font-size: 18px;
+      font-weight: bold;
+      color: #2c3e50;
+    }
+    
+    .monitor-label {
+      font-size: 11px;
+      color: #6c757d;
+      margin-top: 4px;
+    }
+    
+    .monitor-chart {
+      height: 100px;
+      background: #f8f9fa;
+      border-radius: 4px;
+      margin-top: 10px;
+      position: relative;
+    }
+    
+    .resource-warning {
+      background: #fff3cd;
+      border: 1px solid #ffeaa7;
+      border-radius: 4px;
+      padding: 8px;
+      margin-top: 10px;
+      font-size: 12px;
+      color: #856404;
+    }
+    
+    .resource-critical {
+      background: #f8d7da;
+      border: 1px solid #f5c6cb;
+      color: #721c24;
+    }
+    
+    .clear-button {
+      background: #ffc107;
+      color: #212529;
+    }
+    
+    .clear-button:hover {
+      background: #e0a800;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="main-panel">
+      <h1>🎙️ Dual Transcription: Whisper vs AssemblyAI</h1>
+      
+      <div class="control-section">
+        <h3>Recording Controls</h3>
+        <div class="controls">
+          <button id="startBtn" class="btn-primary">Start Recording & Transcription</button>
+          <button id="stopBtn" class="btn-danger" disabled>Stop Recording</button>
+          <button id="clearBtn" class="clear-button">Clear Both Panels</button>
+        </div>
+        
+        <div style="margin-top: 15px;">
+          <span id="statusIndicator" class="status-indicator status-ready">Ready</span>
+          <span id="recordingIndicator" class="status-indicator" style="margin-left: 10px;">No Recording</span>
+        </div>
+      </div>
+      
+      <div class="transcription-area">
+        <div class="transcription-header">
+          <h3>Live Transcription Comparison</h3>
+          <div id="transcriptionStats" style="font-size: 12px; color: #6c757d;">
+            Ready to compare transcriptions...
+          </div>
+        </div>
+        
+        <div class="dual-transcription">
+          <!-- Whisper Panel -->
+          <div class="transcription-panel whisper">
+            <div class="panel-header">
+              <h4 class="panel-title whisper">🔊 Whisper (Local)</h4>
+              <span id="whisperStatus" class="panel-status whisper">Ready</span>
+            </div>
+            
+            <div class="panel-controls">
+              <select id="whisperModelSelect" style="flex: 1;">
+                <option value="tiny.en">Tiny (English) - Fastest</option>
+                <option value="base.en">Base (English) - Balanced</option>
+                <option value="small.en">Small (English) - Better accuracy</option>
+                <option value="medium.en">Medium (English) - High accuracy</option>
+                <option value="large-v3">Large-v3 - Best accuracy</option>
+              </select>
+            </div>
+            
+            <div id="whisperTranscriptionDisplay" class="transcription-display">
+              <div style="text-align: center; color: #6c757d; margin-top: 50px;">
+                Whisper transcription will appear here
+              </div>
+            </div>
+          </div>
+          
+          <!-- AssemblyAI Panel -->
+          <div class="transcription-panel assemblyai">
+            <div class="panel-header">
+              <h4 class="panel-title assemblyai">☁️ AssemblyAI (Cloud)</h4>
+              <span id="assemblyaiStatus" class="panel-status assemblyai">Ready</span>
+            </div>
+            
+            <div class="panel-controls">
+              <select id="assemblyaiModelSelect" style="flex: 1;">
+                <option value="best">Best - Highest accuracy</option>
+                <option value="nano">Nano - Fastest processing</option>
+              </select>
+            </div>
+            
+            <div id="assemblyaiTranscriptionDisplay" class="transcription-display">
+              <div style="text-align: center; color: #6c757d; margin-top: 50px;">
+                AssemblyAI transcription will appear here
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+    
+    <div class="sidebar">
+      <div class="permissions-section">
+        <h3>Permissions</h3>
+        <div class="permission-item">
+          <span>Microphone</span>
+          <span id="micStatus" class="permission-status permission-denied">Checking...</span>
+        </div>
+        <div class="permission-item">
+          <span>Screen Recording</span>
+          <span id="screenStatus" class="permission-status permission-denied">Checking...</span>
+        </div>
+        <button id="checkPermBtn" class="btn-secondary" style="width: 100%; margin-top: 10px;">
+          Check Permissions
+        </button>
+      </div>
+      
+      <div class="system-monitor">
+        <h3>System Resources</h3>
+        <div class="monitor-grid">
+          <div class="monitor-item">
+            <div class="monitor-value" id="cpuValue">0%</div>
+            <div class="monitor-label">CPU Usage</div>
+          </div>
+          <div class="monitor-item">
+            <div class="monitor-value" id="memoryValue">0%</div>
+            <div class="monitor-label">Memory Usage</div>
+          </div>
+          <div class="monitor-item">
+            <div class="monitor-value" id="gpuValue">0%</div>
+            <div class="monitor-label">GPU Usage</div>
+          </div>
+          <div class="monitor-item">
+            <div class="monitor-value" id="processValue">0%</div>
+            <div class="monitor-label">App CPU</div>
+          </div>
+        </div>
+        
+        <div class="monitor-chart">
+          <canvas id="resourceChart" width="310" height="100"></canvas>
+        </div>
+        
+        <div id="resourceWarnings"></div>
+        
+        <div style="margin-top: 15px; font-size: 12px; color: #6c757d;">
+          <div>Platform: <span id="platformInfo">Loading...</span></div>
+          <div>Whisper Model: <span id="currentWhisperModel">None</span></div>
+          <div>AssemblyAI Model: <span id="currentAssemblyAIModel">None</span></div>
+        </div>
+      </div>
+    </div>
+  </div>
+  
+  <script src="renderer.js"></script>
+</body>
+</html>

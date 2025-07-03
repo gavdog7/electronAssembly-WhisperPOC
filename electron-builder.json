@@ -1,0 +1,25 @@
+{
+  "appId": "com.electronaudiopoc.app",
+  "productName": "Audio Capture POC",
+  "directories": {
+    "output": "dist"
+  },
+  "files": [
+    "main.js",
+    "renderer.html",
+    "renderer.js",
+    "audio-capture.js",
+    "package.json",
+    "build/Release/audio_capture.node"
+  ],
+  "mac": {
+    "target": {
+      "target": "dmg",
+      "arch": ["universal"]
+    },
+    "extendInfo": {
+      "NSMicrophoneUsageDescription": "This app needs microphone access to record audio.",
+      "NSScreenCaptureDescription": "This app may need screen recording access to capture system audio."
+    }
+  }
+}
