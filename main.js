@@ -118,11 +118,13 @@ function setupServiceEventHandlers() {
   });
   
   assemblyAIService.on('status', (status) => {
-    mainWindow.webContents.send('assemblyai-status', { status });
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send('assemblyai-status', { status });
+    }
   });
   
   assemblyAIService.on('disconnected', (info) => {
-    if (info.requiresBilling) {
+    if (mainWindow && !mainWindow.isDestroyed() && info.requiresBilling) {
       mainWindow.webContents.send('assemblyai-status', { 
         status: 'error', 
         message: 'Streaming requires billing setup' 
@@ -135,13 +137,15 @@ function setupServiceEventHandlers() {
     transcriptStorage.addError('assemblyai', error);
     
     // Send specific status for billing errors
-    if (error.message && error.message.includes('billing')) {
-      mainWindow.webContents.send('assemblyai-status', { 
-        status: 'error', 
-        message: 'Requires billing setup' 
-      });
-    } else {
-      mainWindow.webContents.send('error', { service: 'assemblyai', error });
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      if (error.message && error.message.includes('billing')) {
+        mainWindow.webContents.send('assemblyai-status', { 
+          status: 'error', 
+          message: 'Requires billing setup' 
+        });
+      } else {
+        mainWindow.webContents.send('error', { service: 'assemblyai', error });
+      }
     }
   });
   
@@ -256,7 +260,10 @@ ipcMain.handle('start-dual-transcription', async (event, options) => {
     // Initialize AssemblyAI connection
     console.log('Connecting to AssemblyAI with model:', assemblyaiModel);
     assemblyAIService.setModel(assemblyaiModel);
-    await assemblyAIService.connect();
+    
+    // Start connection but don't wait for it to complete
+    const assemblyAIConnectPromise = assemblyAIService.connect();
+    console.log('AssemblyAI connection initiated...');
     
     // Start WAV recording
     console.log('Starting WAV recording...');
@@ -289,13 +296,19 @@ ipcMain.handle('start-dual-transcription', async (event, options) => {
     if (result) {
       isRecording = true;
       
-      // Start AssemblyAI recording (only if connected)
-      if (assemblyAIService.isConnected) {
-        assemblyAIService.startRecording();
-      } else {
-        console.warn('AssemblyAI not connected - continuing with Whisper only');
-        mainWindow.webContents.send('assemblyai-status', { status: 'error', message: 'Connection failed - check API key and billing' });
-      }
+      // Wait a moment for AssemblyAI to connect, then start if connected
+      setTimeout(() => {
+        if (assemblyAIService.isConnected) {
+          console.log('Starting AssemblyAI recording...');
+          assemblyAIService.startRecording();
+        } else {
+          console.warn('AssemblyAI not connected - continuing with Whisper only');
+          mainWindow.webContents.send('assemblyai-status', { 
+            status: 'error', 
+            message: 'Connection failed - check API key and billing' 
+          });
+        }
+      }, 1000); // Give 1 second for connection
       
       console.log('Dual transcription started successfully');
       return { 
@@ -488,20 +501,28 @@ app.on('activate', () => {
 // Handle unexpected errors
 process.on('uncaughtException', (error) => {
   console.error('Uncaught exception:', error);
-  if (mainWindow) {
-    mainWindow.webContents.send('error', { 
-      service: 'system', 
-      error: { message: error.message, stack: error.stack } 
-    });
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    try {
+      mainWindow.webContents.send('error', { 
+        service: 'system', 
+        error: { message: error.message, stack: error.stack } 
+      });
+    } catch (sendError) {
+      console.error('Error sending error message:', sendError);
+    }
   }
 });
 
 process.on('unhandledRejection', (reason, promise) => {
   console.error('Unhandled rejection at:', promise, 'reason:', reason);
-  if (mainWindow) {
-    mainWindow.webContents.send('error', { 
-      service: 'system', 
-      error: { message: reason.toString() } 
-    });
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    try {
+      mainWindow.webContents.send('error', { 
+        service: 'system', 
+        error: { message: reason.toString() } 
+      });
+    } catch (sendError) {
+      console.error('Error sending rejection message:', sendError);
+    }
   }
 });

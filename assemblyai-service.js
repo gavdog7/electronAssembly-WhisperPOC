@@ -10,8 +10,8 @@ class AssemblyAIService extends EventEmitter {
     this.isRecording = false;
     this.reconnectAttempts = 0;
     this.maxReconnectAttempts = 5;
-    this.reconnectDelay = 1000;
-    this.currentModel = 'best';
+    this.reconnectDelay = 2000; // Longer delay for connection stability
+    this.currentModel = 'universal-streaming';
     this.sessionId = null;
     this.lastTranscript = '';
     this.connectionStartTime = null;
@@ -30,11 +30,15 @@ class AssemblyAIService extends EventEmitter {
       this.emit('status', 'connecting');
       console.log('Connecting to AssemblyAI WebSocket...');
 
-      const wsUrl = `${config.assemblyAI.websocketUrl}?sample_rate=${config.assemblyAI.sampleRate}`;
+      const wsUrl = config.assemblyAI.websocketUrl;
       
-      this.ws = new WebSocket(wsUrl, {
+      console.log('Connecting to:', wsUrl);
+      console.log('Using API key:', config.assemblyAI.apiKey ? `${config.assemblyAI.apiKey.substring(0, 8)}...` : 'NOT SET');
+      
+      this.ws = new WebSocket(wsUrl, [], {
         headers: {
-          'Authorization': config.assemblyAI.apiKey
+          'Authorization': config.assemblyAI.apiKey,
+          'Content-Type': 'application/json'
         }
       });
 
@@ -43,6 +47,17 @@ class AssemblyAIService extends EventEmitter {
         this.isConnected = true;
         this.reconnectAttempts = 0;
         this.connectionStartTime = Date.now();
+        
+        // Send session begin message for v3 API
+        const beginMessage = {
+          type: 'Begin',
+          sample_rate: config.assemblyAI.sampleRate,
+          encoding: config.assemblyAI.encoding
+        };
+        
+        this.ws.send(JSON.stringify(beginMessage));
+        console.log('Sent Begin message:', beginMessage);
+        
         this.emit('status', 'connected');
         this.emit('connected');
       });
@@ -94,56 +109,57 @@ class AssemblyAIService extends EventEmitter {
   handleMessage(message) {
     const timestamp = Date.now();
     
-    switch (message.message_type) {
-      case 'SessionBegins':
-        this.sessionId = message.session_id;
-        console.log('AssemblyAI session started:', this.sessionId);
-        this.emit('sessionStarted', { sessionId: this.sessionId });
-        break;
-
-      case 'PartialTranscript':
-        if (message.text && message.text.trim()) {
-          const latency = timestamp - (message.created || timestamp);
-          this.updateLatencyMetrics(latency);
-          
-          this.emit('partialTranscript', {
-            text: message.text,
-            confidence: message.confidence,
-            timestamp: timestamp,
-            latency: latency,
-            messageId: message.message_id
-          });
-        }
-        break;
-
-      case 'FinalTranscript':
-        if (message.text && message.text.trim()) {
-          const latency = timestamp - (message.created || timestamp);
-          this.updateLatencyMetrics(latency);
-          
+    // Handle different message types for v3 API
+    if (message.type === 'Begin') {
+      this.sessionId = message.id;
+      console.log('AssemblyAI v3 session started:', this.sessionId);
+      console.log('Session expires at:', new Date(message.expires_at * 1000).toISOString());
+      this.emit('sessionStarted', { sessionId: this.sessionId });
+      return;
+    }
+    
+    // Handle transcription messages
+    if (message.text !== undefined) {
+      const latency = timestamp - (message.created || timestamp);
+      this.updateLatencyMetrics(latency);
+      
+      if (message.text && message.text.trim()) {
+        // Check if this is a final transcript (end of turn)
+        if (message.end_of_turn) {
           this.lastTranscript = message.text;
           this.emit('finalTranscript', {
             text: message.text,
-            confidence: message.confidence,
+            confidence: message.confidence || 0.9, // v3 doesn't always provide confidence
             timestamp: timestamp,
             latency: latency,
-            messageId: message.message_id,
+            turnOrder: message.turn_order,
+            endOfTurn: message.end_of_turn,
             words: message.words || []
           });
+        } else {
+          // Partial transcript
+          this.emit('partialTranscript', {
+            text: message.text,
+            confidence: message.confidence || 0.9,
+            timestamp: timestamp,
+            latency: latency,
+            turnOrder: message.turn_order,
+            endOfTurn: false
+          });
         }
-        break;
-
-      case 'SessionTerminated':
-        console.log('AssemblyAI session terminated');
-        this.sessionId = null;
-        this.emit('sessionTerminated');
-        break;
-
-      default:
-        console.log('Unknown AssemblyAI message type:', message.message_type || 'undefined');
-        console.log('Full message:', message);
-        break;
+      }
+      return;
     }
+    
+    // Handle error messages
+    if (message.error) {
+      console.error('AssemblyAI error message:', message.error);
+      this.emit('error', new Error(message.error));
+      return;
+    }
+    
+    // Unknown message type
+    console.log('Unknown AssemblyAI v3 message:', message);
   }
 
   updateLatencyMetrics(latency) {
@@ -189,9 +205,9 @@ class AssemblyAIService extends EventEmitter {
     this.isRecording = false;
     
     if (this.ws && this.isConnected) {
-      // Send terminate message to end the session
+      // Send end message for v3 API
       this.ws.send(JSON.stringify({
-        terminate: true
+        type: 'End'
       }));
     }
     
@@ -205,12 +221,10 @@ class AssemblyAIService extends EventEmitter {
     }
 
     try {
-      // Convert audio data to base64 for WebSocket transmission
+      // For v3 API, send audio data as base64 string directly
       const base64Audio = Buffer.from(audioData).toString('base64');
       
-      this.ws.send(JSON.stringify({
-        audio_data: base64Audio
-      }));
+      this.ws.send(base64Audio);
       
       this.audioDataCount++;
       return true;

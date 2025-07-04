@@ -13,9 +13,9 @@ class Config {
     // AssemblyAI Configuration
     this.assemblyAI = {
       apiKey: process.env.ASSEMBLYAI_API_KEY || '',
-      model: process.env.ASSEMBLYAI_MODEL || 'best',
+      model: process.env.ASSEMBLYAI_MODEL || 'universal-streaming',
       languageCode: process.env.ASSEMBLYAI_LANGUAGE_CODE || 'en',
-      websocketUrl: 'wss://api.assemblyai.com/v2/realtime/ws',
+      websocketUrl: 'wss://streaming.assemblyai.com/v3/ws',
       sampleRate: 16000,
       wordBoost: [],
       encoding: 'pcm_s16le'
@@ -42,8 +42,7 @@ class Config {
 
     // AssemblyAI Model Configuration
     this.assemblyAIModels = [
-      { value: 'best', label: 'Best - Highest accuracy, slower processing', accuracy: 'Highest', speed: 'Slower' },
-      { value: 'nano', label: 'Nano - Fastest processing, good accuracy', accuracy: 'Good', speed: 'Fastest' }
+      { value: 'universal-streaming', label: 'Universal-Streaming - Latest model, ~300ms latency', accuracy: 'High', speed: 'Fast', cost: '$0.15/hour' }
     ];
 
     // Create necessary directories

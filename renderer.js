@@ -41,7 +41,7 @@ const elements = {
 let isRecording = false;
 let currentSession = null;
 let whisperModel = 'tiny.en';
-let assemblyaiModel = 'best';
+let assemblyaiModel = 'universal-streaming';
 
 // Transcription counters
 let whisperCount = 0;
@@ -72,8 +72,7 @@ const whisperModels = {
 };
 
 const assemblyaiModels = {
-  'best': { name: 'Best', accuracy: 'Highest', speed: 'Slower' },
-  'nano': { name: 'Nano', accuracy: 'Good', speed: 'Fastest' }
+  'universal-streaming': { name: 'Universal-Streaming', accuracy: 'High', speed: 'Fast', cost: '$0.15/hour' }
 };
 
 // Initialize the application
