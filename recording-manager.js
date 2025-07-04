@@ -29,8 +29,8 @@ class RecordingManager extends EventEmitter {
     try {
       console.log('Starting WAV recording...');
       
-      // Generate filename with timestamp
-      const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+      // Generate filename with Central US timestamp
+      const timestamp = this.generateCentralTimestamp();
       this.tempFileName = `recording_${timestamp}_temp.wav`;
       this.finalFileName = `recording_${timestamp}.wav`;
       
@@ -218,6 +218,48 @@ class RecordingManager extends EventEmitter {
       int16Array[i] = sample * 32767;
     }
     return int16Array;
+  }
+
+  generateCentralTimestamp() {
+    const now = new Date();
+    
+    // Convert to Central Time (America/Chicago)
+    const centralTime = new Date(now.toLocaleString("en-US", {timeZone: "America/Chicago"}));
+    
+    // Format: 2024-07-04_____02-30-15_PM_CDT
+    const year = centralTime.getFullYear();
+    const month = String(centralTime.getMonth() + 1).padStart(2, '0');
+    const day = String(centralTime.getDate()).padStart(2, '0');
+    
+    let hours = centralTime.getHours();
+    const minutes = String(centralTime.getMinutes()).padStart(2, '0');
+    const seconds = String(centralTime.getSeconds()).padStart(2, '0');
+    
+    // Determine AM/PM and convert to 12-hour format
+    const ampm = hours >= 12 ? 'PM' : 'AM';
+    hours = hours % 12;
+    hours = hours ? hours : 12; // 0 should be 12
+    const hoursStr = String(hours).padStart(2, '0');
+    
+    // Determine timezone abbreviation (CDT during daylight saving, CST during standard)
+    const isDST = this.isDaylightSavingTime(now);
+    const timezone = isDST ? 'CDT' : 'CST';
+    
+    return `${year}-${month}-${day}_____${hoursStr}-${minutes}-${seconds}_${ampm}_${timezone}`;
+  }
+
+  isDaylightSavingTime(date) {
+    // Get the timezone offset for January (standard time) and July (daylight time)
+    const jan = new Date(date.getFullYear(), 0, 1);
+    const jul = new Date(date.getFullYear(), 6, 1);
+    
+    // Convert to Central time zone
+    const janOffset = new Date(jan.toLocaleString("en-US", {timeZone: "America/Chicago"})).getTimezoneOffset();
+    const julOffset = new Date(jul.toLocaleString("en-US", {timeZone: "America/Chicago"})).getTimezoneOffset();
+    const currentOffset = new Date(date.toLocaleString("en-US", {timeZone: "America/Chicago"})).getTimezoneOffset();
+    
+    // DST is in effect if the current offset matches the July offset (which should be smaller/more negative)
+    return currentOffset === Math.min(janOffset, julOffset);
   }
 
   resetRecordingState() {
