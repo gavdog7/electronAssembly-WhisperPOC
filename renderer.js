@@ -25,6 +25,12 @@ const elements = {
   micStatus: document.getElementById('micStatus'),
   screenStatus: document.getElementById('screenStatus'),
   
+  // Calendar
+  calendarCheckBtn: document.getElementById('calendarCheckBtn'),
+  calendarModal: document.getElementById('calendarModal'),
+  closeModal: document.getElementById('closeModal'),
+  calendarContent: document.getElementById('calendarContent'),
+  
   // System monitoring
   cpuValue: document.getElementById('cpuValue'),
   memoryValue: document.getElementById('memoryValue'),
@@ -109,6 +115,15 @@ function setupEventListeners() {
   elements.stopBtn.addEventListener('click', stopRecording);
   elements.clearBtn.addEventListener('click', clearBothPanels);
   elements.checkPermBtn.addEventListener('click', checkPermissions);
+  elements.calendarCheckBtn.addEventListener('click', showCalendarCheck);
+  elements.closeModal.addEventListener('click', hideCalendarModal);
+  
+  // Close modal when clicking outside of it
+  elements.calendarModal.addEventListener('click', (e) => {
+    if (e.target === elements.calendarModal) {
+      hideCalendarModal();
+    }
+  });
   
   // IPC listeners
   setupIpcListeners();
@@ -649,6 +664,103 @@ function updateResourceWarnings(stats) {
     div.textContent = warning.message;
     elements.resourceWarnings.appendChild(div);
   });
+}
+
+// Calendar functions
+async function showCalendarCheck() {
+  try {
+    elements.calendarCheckBtn.disabled = true;
+    elements.calendarCheckBtn.textContent = 'Loading...';
+    
+    // Show modal with loading state
+    elements.calendarContent.innerHTML = `
+      <div style="text-align: center; color: #6c757d; padding: 20px;">
+        <div>📅 Downloading calendar data...</div>
+        <div style="margin-top: 10px; font-size: 12px;">This may take a few seconds</div>
+      </div>
+    `;
+    elements.calendarModal.style.display = 'block';
+    
+    // Request calendar data from main process
+    const events = await ipcRenderer.invoke('get-calendar-events');
+    
+    if (events && events.length > 0) {
+      displayCalendarEvents(events);
+    } else {
+      elements.calendarContent.innerHTML = `
+        <div style="text-align: center; color: #6c757d; padding: 20px;">
+          <div>📅 No events found for today</div>
+          <div style="margin-top: 10px; font-size: 12px;">Your calendar may be empty or there may be a connection issue</div>
+        </div>
+      `;
+    }
+    
+  } catch (error) {
+    console.error('Calendar check error:', error);
+    elements.calendarContent.innerHTML = `
+      <div style="text-align: center; color: #dc3545; padding: 20px;">
+        <div>❌ Error loading calendar</div>
+        <div style="margin-top: 10px; font-size: 12px;">${error.message}</div>
+      </div>
+    `;
+  } finally {
+    elements.calendarCheckBtn.disabled = false;
+    elements.calendarCheckBtn.textContent = 'Calendar Check';
+  }
+}
+
+function displayCalendarEvents(events) {
+  let html = '';
+  
+  if (events.length === 0) {
+    html = `
+      <div style="text-align: center; color: #6c757d; padding: 20px;">
+        📅 No events scheduled for today
+      </div>
+    `;
+  } else {
+    html = `
+      <div style="margin-bottom: 15px; color: #6c757d; font-size: 14px;">
+        Found ${events.length} event(s) for today:
+      </div>
+    `;
+    
+    events.forEach((event, index) => {
+      html += `
+        <div class="meeting-item">
+          <div class="meeting-title">
+            ${event.summary || 'Untitled Event'}
+          </div>
+          <div class="meeting-time">
+            🕐 ${event.formattedStart}
+            ${event.formattedEnd ? ` → ${event.formattedEnd}` : ''}
+          </div>
+          ${event.location ? `
+            <div style="margin-bottom: 10px; color: #6c757d; font-size: 14px;">
+              📍 ${event.location}
+            </div>
+          ` : ''}
+          ${event.description ? `
+            <div style="margin-bottom: 10px; color: #495057; font-size: 14px;">
+              ${event.description}
+            </div>
+          ` : ''}
+          <details style="margin-top: 10px;">
+            <summary style="cursor: pointer; color: #007bff; font-size: 12px;">
+              Show Raw ICS Data
+            </summary>
+            <div class="meeting-details">${event.raw}</div>
+          </details>
+        </div>
+      `;
+    });
+  }
+  
+  elements.calendarContent.innerHTML = html;
+}
+
+function hideCalendarModal() {
+  elements.calendarModal.style.display = 'none';
 }
 
 // Initialize when DOM is ready

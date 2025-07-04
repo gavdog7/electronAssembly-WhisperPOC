@@ -6,6 +6,7 @@ const TranscriptionWorker = require('./transcription-worker');
 const AssemblyAIService = require('./assemblyai-service');
 const RecordingManager = require('./recording-manager');
 const TranscriptStorage = require('./transcript-storage');
+const CalendarService = require('./calendar-service');
 const config = require('./config');
 
 // Disable sandbox for testing (not recommended for production)
@@ -18,6 +19,7 @@ let transcriptionWorker;
 let assemblyAIService;
 let recordingManager;
 let transcriptStorage;
+let calendarService;
 
 // State management
 let isRecording = false;
@@ -55,9 +57,13 @@ function initializeServices() {
   assemblyAIService = new AssemblyAIService();
   recordingManager = new RecordingManager();
   transcriptStorage = new TranscriptStorage();
+  calendarService = new CalendarService();
   
   // Set up service event handlers
   setupServiceEventHandlers();
+  
+  // Start calendar auto-refresh
+  calendarService.startAutoRefresh(5);
   
   console.log('Configuration:', {
     assemblyAIConfigured: config.isAssemblyAIConfigured(),
@@ -428,6 +434,18 @@ ipcMain.handle('check-permissions', async () => {
 
 ipcMain.handle('get-system-info', async () => {
   return systemMonitor.getSystemInfo();
+});
+
+// Calendar handlers
+ipcMain.handle('get-calendar-events', async () => {
+  try {
+    const events = await calendarService.refreshAndGetTodaysEvents();
+    console.log(`Found ${events.length} calendar events for today`);
+    return events;
+  } catch (error) {
+    console.error('Error getting calendar events:', error);
+    throw error;
+  }
 });
 
 // Session management handlers

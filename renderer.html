@@ -391,6 +391,90 @@
     .clear-button:hover {
       background: #e0a800;
     }
+    
+    /* Calendar Popup Modal */
+    .modal {
+      display: none;
+      position: fixed;
+      z-index: 1000;
+      left: 0;
+      top: 0;
+      width: 100%;
+      height: 100%;
+      background-color: rgba(0,0,0,0.5);
+    }
+    
+    .modal-content {
+      background-color: white;
+      margin: 5% auto;
+      padding: 20px;
+      border-radius: 8px;
+      width: 80%;
+      max-width: 800px;
+      max-height: 80vh;
+      overflow-y: auto;
+      box-shadow: 0 4px 20px rgba(0,0,0,0.3);
+    }
+    
+    .modal-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 20px;
+      padding-bottom: 10px;
+      border-bottom: 1px solid #dee2e6;
+    }
+    
+    .modal-title {
+      font-size: 24px;
+      font-weight: bold;
+      color: #2c3e50;
+    }
+    
+    .close {
+      color: #aaa;
+      font-size: 28px;
+      font-weight: bold;
+      cursor: pointer;
+      line-height: 1;
+    }
+    
+    .close:hover {
+      color: #000;
+    }
+    
+    .meeting-item {
+      background: #f8f9fa;
+      border-radius: 6px;
+      padding: 15px;
+      margin-bottom: 15px;
+      border-left: 4px solid #007bff;
+    }
+    
+    .meeting-title {
+      font-size: 18px;
+      font-weight: bold;
+      color: #2c3e50;
+      margin-bottom: 8px;
+    }
+    
+    .meeting-time {
+      font-size: 14px;
+      color: #6c757d;
+      margin-bottom: 10px;
+    }
+    
+    .meeting-details {
+      font-family: monospace;
+      font-size: 12px;
+      background: white;
+      padding: 10px;
+      border-radius: 4px;
+      border: 1px solid #dee2e6;
+      white-space: pre-wrap;
+      max-height: 200px;
+      overflow-y: auto;
+    }
   </style>
 </head>
 <body>
@@ -482,6 +566,9 @@
         <button id="checkPermBtn" class="btn-secondary" style="width: 100%; margin-top: 10px;">
           Check Permissions
         </button>
+        <button id="calendarCheckBtn" class="btn-success" style="width: 100%; margin-top: 10px;">
+          Calendar Check
+        </button>
       </div>
       
       <div class="system-monitor">
@@ -515,6 +602,21 @@
           <div>Platform: <span id="platformInfo">Loading...</span></div>
           <div>Whisper Model: <span id="currentWhisperModel">None</span></div>
           <div>AssemblyAI Model: <span id="currentAssemblyAIModel">None</span></div>
+        </div>
+      </div>
+    </div>
+  </div>
+  
+  <!-- Calendar Check Modal -->
+  <div id="calendarModal" class="modal">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h2 class="modal-title">📅 Today's Calendar Events</h2>
+        <span class="close" id="closeModal">&times;</span>
+      </div>
+      <div id="calendarContent">
+        <div style="text-align: center; color: #6c757d; padding: 20px;">
+          Loading calendar data...
         </div>
       </div>
     </div>
