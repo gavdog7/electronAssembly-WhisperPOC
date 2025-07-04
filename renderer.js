@@ -459,8 +459,22 @@ function updateAssemblyAIStatus(status) {
       statusText = 'Streaming';
       break;
     case 'error':
-      statusText = 'Error';
+      statusText = status.message || 'Error';
       statusClass = 'error';
+      
+      // Show billing message in panel if needed
+      if (status.message && status.message.includes('billing')) {
+        elements.assemblyaiTranscriptionDisplay.innerHTML = `
+          <div style="text-align: center; color: #dc3545; margin-top: 50px;">
+            <strong>⚠️ AssemblyAI Streaming Requires Billing</strong><br><br>
+            <small style="color: #6c757d;">
+              Real-time streaming requires adding a credit card to your AssemblyAI account.<br>
+              Visit <a href="https://app.assemblyai.com/" target="_blank">app.assemblyai.com</a> to add billing.<br><br>
+              <strong>Whisper transcription will continue normally.</strong>
+            </small>
+          </div>
+        `;
+      }
       break;
   }
   

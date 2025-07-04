@@ -121,10 +121,28 @@ function setupServiceEventHandlers() {
     mainWindow.webContents.send('assemblyai-status', { status });
   });
   
+  assemblyAIService.on('disconnected', (info) => {
+    if (info.requiresBilling) {
+      mainWindow.webContents.send('assemblyai-status', { 
+        status: 'error', 
+        message: 'Streaming requires billing setup' 
+      });
+    }
+  });
+  
   assemblyAIService.on('error', (error) => {
     console.error('AssemblyAI error:', error);
     transcriptStorage.addError('assemblyai', error);
-    mainWindow.webContents.send('error', { service: 'assemblyai', error });
+    
+    // Send specific status for billing errors
+    if (error.message && error.message.includes('billing')) {
+      mainWindow.webContents.send('assemblyai-status', { 
+        status: 'error', 
+        message: 'Requires billing setup' 
+      });
+    } else {
+      mainWindow.webContents.send('error', { service: 'assemblyai', error });
+    }
   });
   
   // Recording manager events
@@ -244,7 +262,11 @@ ipcMain.handle('start-dual-transcription', async (event, options) => {
     console.log('Starting WAV recording...');
     recordingManager.startRecording();
     
-    // Start audio capture with dual streaming
+    // Start audio capture with dual streaming (stop first if already running)
+    if (audioCapture.isStreaming) {
+      audioCapture.stopStreaming();
+    }
+    
     const result = audioCapture.startStreaming((audioChunk) => {
       try {
         // Send to Whisper
@@ -253,8 +275,8 @@ ipcMain.handle('start-dual-transcription', async (event, options) => {
         // Send to recording
         recordingManager.addAudioData(audioChunk);
         
-        // Convert and send to AssemblyAI
-        if (assemblyAIService.isConnected) {
+        // Convert and send to AssemblyAI (only if connected and recording)
+        if (assemblyAIService.isConnected && assemblyAIService.isRecording) {
           // Convert Float32Array to PCM16 for AssemblyAI
           const pcmData = AssemblyAIService.convertAudioFormat(audioChunk, 'float32', 'int16');
           assemblyAIService.sendAudio(pcmData);
@@ -267,8 +289,13 @@ ipcMain.handle('start-dual-transcription', async (event, options) => {
     if (result) {
       isRecording = true;
       
-      // Start AssemblyAI recording
-      assemblyAIService.startRecording();
+      // Start AssemblyAI recording (only if connected)
+      if (assemblyAIService.isConnected) {
+        assemblyAIService.startRecording();
+      } else {
+        console.warn('AssemblyAI not connected - continuing with Whisper only');
+        mainWindow.webContents.send('assemblyai-status', { status: 'error', message: 'Connection failed - check API key and billing' });
+      }
       
       console.log('Dual transcription started successfully');
       return { 

@@ -53,6 +53,7 @@ class AssemblyAIService extends EventEmitter {
           this.handleMessage(message);
         } catch (error) {
           console.error('Error parsing AssemblyAI message:', error);
+          console.error('Raw message data:', data.toString());
           this.emit('error', error);
         }
       });
@@ -61,6 +62,15 @@ class AssemblyAIService extends EventEmitter {
         console.log(`AssemblyAI WebSocket closed: ${code} - ${reason}`);
         this.isConnected = false;
         this.emit('status', 'disconnected');
+        
+        // Handle specific error codes
+        if (code === 4003) {
+          const error = new Error(`AssemblyAI Streaming requires billing setup. Code: ${code} - ${reason}`);
+          this.emit('error', error);
+          this.emit('disconnected', { code, reason, requiresBilling: true });
+          return;
+        }
+        
         this.emit('disconnected', { code, reason });
         
         if (this.isRecording && this.reconnectAttempts < this.maxReconnectAttempts) {
@@ -130,7 +140,8 @@ class AssemblyAIService extends EventEmitter {
         break;
 
       default:
-        console.log('Unknown AssemblyAI message type:', message.message_type);
+        console.log('Unknown AssemblyAI message type:', message.message_type || 'undefined');
+        console.log('Full message:', message);
         break;
     }
   }
