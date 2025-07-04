@@ -2,33 +2,56 @@ const { ipcRenderer } = require('electron');
 
 // UI Elements
 const elements = {
-  modelSelect: document.getElementById('modelSelect'),
-  modelInfo: document.getElementById('modelInfo'),
+  // Recording controls
   startBtn: document.getElementById('startBtn'),
   stopBtn: document.getElementById('stopBtn'),
   clearBtn: document.getElementById('clearBtn'),
-  checkPermBtn: document.getElementById('checkPermBtn'),
   statusIndicator: document.getElementById('statusIndicator'),
-  transcriptionDisplay: document.getElementById('transcriptionDisplay'),
+  recordingIndicator: document.getElementById('recordingIndicator'),
   transcriptionStats: document.getElementById('transcriptionStats'),
+  
+  // Whisper panel
+  whisperModelSelect: document.getElementById('whisperModelSelect'),
+  whisperStatus: document.getElementById('whisperStatus'),
+  whisperTranscriptionDisplay: document.getElementById('whisperTranscriptionDisplay'),
+  
+  // AssemblyAI panel
+  assemblyaiModelSelect: document.getElementById('assemblyaiModelSelect'),
+  assemblyaiStatus: document.getElementById('assemblyaiStatus'),
+  assemblyaiTranscriptionDisplay: document.getElementById('assemblyaiTranscriptionDisplay'),
+  
+  // Permissions
+  checkPermBtn: document.getElementById('checkPermBtn'),
   micStatus: document.getElementById('micStatus'),
   screenStatus: document.getElementById('screenStatus'),
+  
+  // System monitoring
   cpuValue: document.getElementById('cpuValue'),
   memoryValue: document.getElementById('memoryValue'),
   gpuValue: document.getElementById('gpuValue'),
   processValue: document.getElementById('processValue'),
   resourceWarnings: document.getElementById('resourceWarnings'),
   platformInfo: document.getElementById('platformInfo'),
-  currentModel: document.getElementById('currentModel'),
+  currentWhisperModel: document.getElementById('currentWhisperModel'),
+  currentAssemblyAIModel: document.getElementById('currentAssemblyAIModel'),
   resourceChart: document.getElementById('resourceChart')
 };
 
 // Application state
-let isTranscribing = false;
-let transcriptionCount = 0;
-let selectedModel = 'tiny.en';
-let lastTranscriptionTime = 0;
-let continuousTranscript = '';
+let isRecording = false;
+let currentSession = null;
+let whisperModel = 'tiny.en';
+let assemblyaiModel = 'best';
+
+// Transcription counters
+let whisperCount = 0;
+let assemblyaiCount = 0;
+
+// Continuous transcripts
+let whisperTranscript = '';
+let assemblyaiTranscript = '';
+
+// System stats history for charts
 let systemStatsHistory = {
   cpu: [],
   memory: [],
@@ -40,53 +63,112 @@ let systemStatsHistory = {
 const chartCtx = elements.resourceChart.getContext('2d');
 
 // Model information
-const modelInfo = {
-  'tiny.en': { name: 'Tiny (English)', size: '~39MB', speed: 'Fastest', memory: 'Low', accuracy: 'Basic' },
-  'small.en': { name: 'Small (English)', size: '~244MB', speed: 'Medium', memory: 'High', accuracy: 'Better' }
+const whisperModels = {
+  'tiny.en': { name: 'Tiny (English)', size: '~39MB', speed: 'Fastest', memory: 'Low' },
+  'base.en': { name: 'Base (English)', size: '~74MB', speed: 'Fast', memory: 'Medium' },
+  'small.en': { name: 'Small (English)', size: '~244MB', speed: 'Medium', memory: 'High' },
+  'medium.en': { name: 'Medium (English)', size: '~769MB', speed: 'Slow', memory: 'Very High' },
+  'large-v3': { name: 'Large-v3', size: '~1550MB', speed: 'Slowest', memory: 'Maximum' }
+};
+
+const assemblyaiModels = {
+  'best': { name: 'Best', accuracy: 'Highest', speed: 'Slower' },
+  'nano': { name: 'Nano', accuracy: 'Good', speed: 'Fastest' }
 };
 
 // Initialize the application
 function initialize() {
   setupEventListeners();
   checkPermissions();
-  updateModelInfo();
   loadSystemInfo();
+  updateModelDisplay();
+  clearBothPanels();
 }
 
 function setupEventListeners() {
   // Model selection
-  elements.modelSelect.addEventListener('change', (e) => {
-    selectedModel = e.target.value;
-    updateModelInfo();
+  elements.whisperModelSelect.addEventListener('change', (e) => {
+    whisperModel = e.target.value;
+    updateModelDisplay();
     
-    if (isTranscribing) {
-      switchModel(selectedModel);
+    if (isRecording) {
+      ipcRenderer.invoke('switch-whisper-model', whisperModel);
+    }
+  });
+  
+  elements.assemblyaiModelSelect.addEventListener('change', (e) => {
+    assemblyaiModel = e.target.value;
+    updateModelDisplay();
+    
+    if (isRecording) {
+      ipcRenderer.invoke('switch-assemblyai-model', assemblyaiModel);
     }
   });
   
   // Control buttons
-  elements.startBtn.addEventListener('click', startTranscription);
-  elements.stopBtn.addEventListener('click', stopTranscription);
-  elements.clearBtn.addEventListener('click', clearTranscription);
+  elements.startBtn.addEventListener('click', startRecording);
+  elements.stopBtn.addEventListener('click', stopRecording);
+  elements.clearBtn.addEventListener('click', clearBothPanels);
   elements.checkPermBtn.addEventListener('click', checkPermissions);
   
-  // Listen for system stats updates
+  // IPC listeners
+  setupIpcListeners();
+}
+
+function setupIpcListeners() {
+  // System monitoring
   ipcRenderer.on('system-stats', (event, stats) => {
     updateSystemMonitor(stats);
   });
   
-  // Listen for transcription results
-  ipcRenderer.on('transcription-result', (event, result) => {
-    addTranscriptionResult(result);
+  // Whisper transcription results
+  ipcRenderer.on('whisper-transcription', (event, result) => {
+    addWhisperTranscription(result);
+  });
+  
+  // AssemblyAI transcription results
+  ipcRenderer.on('assemblyai-transcription', (event, result) => {
+    addAssemblyAITranscription(result);
+  });
+  
+  // Service status updates
+  ipcRenderer.on('whisper-status', (event, status) => {
+    updateWhisperStatus(status);
+  });
+  
+  ipcRenderer.on('assemblyai-status', (event, status) => {
+    updateAssemblyAIStatus(status);
+  });
+  
+  // Recording status updates
+  ipcRenderer.on('recording-status', (event, status) => {
+    updateRecordingStatus(status);
+  });
+  
+  // Session updates
+  ipcRenderer.on('session-started', (event, sessionInfo) => {
+    currentSession = sessionInfo;
+    console.log('Session started:', sessionInfo.sessionId);
+  });
+  
+  ipcRenderer.on('session-ended', (event, sessionInfo) => {
+    console.log('Session ended:', sessionInfo.sessionId);
+    currentSession = null;
+  });
+  
+  // Error handling
+  ipcRenderer.on('error', (event, error) => {
+    console.error('Application error:', error);
+    updateStatus(`Error: ${error.message}`, 'status-ready');
   });
 }
 
-function updateModelInfo() {
-  const info = modelInfo[selectedModel];
-  elements.modelInfo.innerHTML = `
-    <strong>${info.name}</strong> - Size: ${info.size}, Speed: ${info.speed}, Memory: ${info.memory}, Accuracy: ${info.accuracy}
-  `;
-  elements.currentModel.textContent = info.name;
+function updateModelDisplay() {
+  const whisperInfo = whisperModels[whisperModel];
+  const assemblyaiInfo = assemblyaiModels[assemblyaiModel];
+  
+  elements.currentWhisperModel.textContent = whisperInfo.name;
+  elements.currentAssemblyAIModel.textContent = assemblyaiInfo.name;
 }
 
 async function checkPermissions() {
@@ -119,135 +201,276 @@ async function loadSystemInfo() {
   }
 }
 
-async function startTranscription() {
+async function startRecording() {
   try {
     updateStatus('Initializing...', 'status-processing');
     elements.startBtn.disabled = true;
     
-    const result = await ipcRenderer.invoke('start-transcription', selectedModel);
+    // Start the dual transcription session
+    const result = await ipcRenderer.invoke('start-dual-transcription', {
+      whisperModel: whisperModel,
+      assemblyaiModel: assemblyaiModel
+    });
     
     if (result.success) {
-      isTranscribing = true;
+      isRecording = true;
       elements.startBtn.disabled = true;
       elements.stopBtn.disabled = false;
+      
       updateStatus('Recording & Transcribing', 'status-recording');
-      elements.transcriptionStats.textContent = `Model: ${result.model} | Transcriptions: 0`;
+      updateRecordingIndicator('Recording WAV file', 'status-recording');
+      
+      // Clear transcripts for new session
+      whisperCount = 0;
+      assemblyaiCount = 0;
+      whisperTranscript = '';
+      assemblyaiTranscript = '';
+      
+      // Update initial panel content
+      updateTranscriptionPanels();
+      updateTranscriptionStats();
+      
     } else {
       elements.startBtn.disabled = false;
       updateStatus(`Error: ${result.error}`, 'status-ready');
     }
   } catch (error) {
-    console.error('Start transcription error:', error);
+    console.error('Start recording error:', error);
     elements.startBtn.disabled = false;
-    updateStatus('Failed to start transcription', 'status-ready');
+    updateStatus('Failed to start recording', 'status-ready');
   }
 }
 
-async function stopTranscription() {
+async function stopRecording() {
   try {
     updateStatus('Stopping...', 'status-processing');
     elements.stopBtn.disabled = true;
     
-    const result = await ipcRenderer.invoke('stop-transcription');
+    const result = await ipcRenderer.invoke('stop-dual-transcription');
     
     if (result.success) {
-      isTranscribing = false;
+      isRecording = false;
       elements.startBtn.disabled = false;
       elements.stopBtn.disabled = true;
+      
       updateStatus('Ready', 'status-ready');
+      updateRecordingIndicator('No Recording', 'status-ready');
+      
+      // Show session summary
+      if (result.sessionInfo) {
+        showSessionSummary(result.sessionInfo);
+      }
+      
     } else {
       updateStatus(`Error: ${result.error}`, 'status-ready');
+      elements.stopBtn.disabled = false;
     }
   } catch (error) {
-    console.error('Stop transcription error:', error);
-    updateStatus('Failed to stop transcription', 'status-ready');
+    console.error('Stop recording error:', error);
+    updateStatus('Failed to stop recording', 'status-ready');
+    elements.stopBtn.disabled = false;
   }
 }
 
-async function switchModel(newModel) {
-  try {
-    updateStatus('Switching model...', 'status-processing');
-    
-    const result = await ipcRenderer.invoke('switch-model', newModel);
-    
-    if (result.success) {
-      selectedModel = result.model;
-      updateStatus('Recording & Transcribing', 'status-recording');
-      updateModelInfo();
-    } else {
-      updateStatus(`Model switch error: ${result.error}`, 'status-recording');
-    }
-  } catch (error) {
-    console.error('Model switch error:', error);
-    updateStatus('Model switch failed', 'status-recording');
-  }
-}
-
-function clearTranscription() {
-  elements.transcriptionDisplay.innerHTML = `
-    <div style="text-align: center; color: #6c757d; margin-top: 100px;">
-      Transcription cleared. ${isTranscribing ? 'Listening...' : 'Click "Start Transcription" to begin'}
+function clearBothPanels() {
+  whisperCount = 0;
+  assemblyaiCount = 0;
+  whisperTranscript = '';
+  assemblyaiTranscript = '';
+  
+  elements.whisperTranscriptionDisplay.innerHTML = `
+    <div style="text-align: center; color: #6c757d; margin-top: 50px;">
+      ${isRecording ? 'Listening for audio...' : 'Whisper transcription will appear here'}
     </div>
   `;
-  transcriptionCount = 0;
-  continuousTranscript = '';
-  lastTranscriptionTime = 0;
+  
+  elements.assemblyaiTranscriptionDisplay.innerHTML = `
+    <div style="text-align: center; color: #6c757d; margin-top: 50px;">
+      ${isRecording ? 'Connecting to AssemblyAI...' : 'AssemblyAI transcription will appear here'}
+    </div>
+  `;
+  
   updateTranscriptionStats();
 }
 
-function addTranscriptionResult(result) {
-  transcriptionCount++;
+function addWhisperTranscription(result) {
+  whisperCount++;
   
-  // Clear placeholder text if this is the first transcription
-  if (transcriptionCount === 1) {
-    elements.transcriptionDisplay.innerHTML = '';
-    continuousTranscript = '';
-    lastTranscriptionTime = Date.now();
+  if (result.text && result.text.trim()) {
+    if (whisperCount === 1) {
+      whisperTranscript = '';
+    }
+    
+    // Add text with proper spacing
+    const textToAdd = result.text.trim();
+    if (textToAdd) {
+      whisperTranscript += (whisperTranscript ? ' ' : '') + textToAdd;
+    }
   }
   
-  const currentTime = Date.now();
-  const timeSinceLastTranscription = (currentTime - lastTranscriptionTime) / 1000; // in seconds
+  updateWhisperPanel(result);
+  updateTranscriptionStats();
+}
+
+function addAssemblyAITranscription(result) {
+  assemblyaiCount++;
   
-  // Add speaker change detection - add line break if gap > 3 seconds
-  let speakerBreak = '';
-  if (timeSinceLastTranscription > 3 && continuousTranscript.length > 0) {
-    speakerBreak = '\n\n';
+  if (result.text && result.text.trim()) {
+    if (assemblyaiCount === 1) {
+      assemblyaiTranscript = '';
+    }
+    
+    // Handle partial vs final transcripts
+    if (result.type === 'final') {
+      const textToAdd = result.text.trim();
+      if (textToAdd) {
+        assemblyaiTranscript += (assemblyaiTranscript ? ' ' : '') + textToAdd;
+      }
+    }
   }
   
-  // Add text to continuous transcript
-  const textToAdd = result.text.trim();
-  if (textToAdd) {
-    continuousTranscript += speakerBreak + textToAdd + ' ';
-  }
-  
-  // Update the display with continuous transcript
+  updateAssemblyAIPanel(result);
+  updateTranscriptionStats();
+}
+
+function updateWhisperPanel(result) {
   const timestamp = new Date(result.timestamp).toLocaleTimeString();
-  const confidence = Math.round(result.confidence * 100);
+  const confidence = result.confidence ? Math.round(result.confidence * 100) : 'N/A';
   
-  elements.transcriptionDisplay.innerHTML = `
+  let displayText = whisperTranscript;
+  
+  // For partial results, show them in gray
+  if (result.type === 'partial' && result.text) {
+    displayText += ` <span style="color: #999; font-style: italic;">${result.text.trim()}</span>`;
+  }
+  
+  elements.whisperTranscriptionDisplay.innerHTML = `
     <div class="continuous-transcript">
-      ${continuousTranscript.replace(/\n/g, '<br>')}
+      ${displayText || '<em style="color: #6c757d;">Listening for audio...</em>'}
     </div>
     <div class="transcript-metadata">
       <small style="color: #6c757d; font-size: 11px;">
-        Latest: ${timestamp} | Model: ${result.model} | Confidence: ${confidence}% | Processing: ${result.processingTime?.toFixed(2)}s
+        Latest: ${timestamp} | Model: ${result.model || whisperModel} | Confidence: ${confidence}%
+        ${result.processingTime ? ` | Processing: ${result.processingTime.toFixed(2)}s` : ''}
       </small>
     </div>
   `;
   
   // Auto-scroll to bottom
-  elements.transcriptionDisplay.scrollTop = elements.transcriptionDisplay.scrollHeight;
+  elements.whisperTranscriptionDisplay.scrollTop = elements.whisperTranscriptionDisplay.scrollHeight;
+}
+
+function updateAssemblyAIPanel(result) {
+  const timestamp = new Date(result.timestamp).toLocaleTimeString();
+  const confidence = result.confidence ? Math.round(result.confidence * 100) : 'N/A';
   
-  lastTranscriptionTime = currentTime;
-  updateTranscriptionStats();
+  let displayText = assemblyaiTranscript;
+  
+  // For partial results, show them in gray
+  if (result.type === 'partial' && result.text) {
+    displayText += ` <span style="color: #999; font-style: italic;">${result.text.trim()}</span>`;
+  }
+  
+  elements.assemblyaiTranscriptionDisplay.innerHTML = `
+    <div class="continuous-transcript">
+      ${displayText || '<em style="color: #6c757d;">Connecting to AssemblyAI...</em>'}
+    </div>
+    <div class="transcript-metadata">
+      <small style="color: #6c757d; font-size: 11px;">
+        Latest: ${timestamp} | Model: ${result.model || assemblyaiModel} | Confidence: ${confidence}%
+        ${result.latency ? ` | Latency: ${result.latency}ms` : ''}
+      </small>
+    </div>
+  `;
+  
+  // Auto-scroll to bottom
+  elements.assemblyaiTranscriptionDisplay.scrollTop = elements.assemblyaiTranscriptionDisplay.scrollHeight;
+}
+
+function updateTranscriptionPanels() {
+  if (!isRecording) return;
+  
+  if (whisperCount === 0) {
+    elements.whisperTranscriptionDisplay.innerHTML = `
+      <div style="text-align: center; color: #6c757d; margin-top: 50px;">
+        <em>Listening for audio...</em>
+      </div>
+    `;
+  }
+  
+  if (assemblyaiCount === 0) {
+    elements.assemblyaiTranscriptionDisplay.innerHTML = `
+      <div style="text-align: center; color: #6c757d; margin-top: 50px;">
+        <em>Connecting to AssemblyAI...</em>
+      </div>
+    `;
+  }
 }
 
 function updateTranscriptionStats() {
-  if (isTranscribing) {
-    elements.transcriptionStats.textContent = `Model: ${selectedModel} | Transcriptions: ${transcriptionCount}`;
+  if (isRecording) {
+    elements.transcriptionStats.textContent = 
+      `Whisper: ${whisperCount} segments | AssemblyAI: ${assemblyaiCount} segments`;
   } else {
-    elements.transcriptionStats.textContent = `Total transcriptions: ${transcriptionCount}`;
+    elements.transcriptionStats.textContent = 
+      `Session total - Whisper: ${whisperCount} | AssemblyAI: ${assemblyaiCount}`;
   }
+}
+
+function updateWhisperStatus(status) {
+  let statusText = 'Unknown';
+  let statusClass = 'whisper';
+  
+  switch (status.status) {
+    case 'ready':
+      statusText = 'Ready';
+      break;
+    case 'loading':
+      statusText = 'Loading Model';
+      break;
+    case 'transcribing':
+      statusText = 'Transcribing';
+      break;
+    case 'error':
+      statusText = 'Error';
+      statusClass = 'error';
+      break;
+  }
+  
+  elements.whisperStatus.textContent = statusText;
+  elements.whisperStatus.className = `panel-status ${statusClass}`;
+}
+
+function updateAssemblyAIStatus(status) {
+  let statusText = 'Unknown';
+  let statusClass = 'assemblyai';
+  
+  switch (status.status) {
+    case 'disconnected':
+      statusText = 'Disconnected';
+      break;
+    case 'connecting':
+      statusText = 'Connecting';
+      break;
+    case 'connected':
+      statusText = 'Connected';
+      break;
+    case 'recording':
+      statusText = 'Streaming';
+      break;
+    case 'error':
+      statusText = 'Error';
+      statusClass = 'error';
+      break;
+  }
+  
+  elements.assemblyaiStatus.textContent = statusText;
+  elements.assemblyaiStatus.className = `panel-status ${statusClass}`;
+}
+
+function updateRecordingIndicator(message, className) {
+  elements.recordingIndicator.textContent = message;
+  elements.recordingIndicator.className = `status-indicator ${className}`;
 }
 
 function updateStatus(message, className) {
@@ -255,6 +478,19 @@ function updateStatus(message, className) {
   elements.statusIndicator.className = `status-indicator ${className}`;
 }
 
+function showSessionSummary(sessionInfo) {
+  const duration = ((sessionInfo.endTime - sessionInfo.startTime) / 1000).toFixed(1);
+  
+  updateTranscriptionStats();
+  
+  console.log(`Session completed: ${sessionInfo.sessionId}`);
+  console.log(`Duration: ${duration}s`);
+  console.log(`Recording: ${sessionInfo.recordingFile || 'N/A'}`);
+  console.log(`Whisper segments: ${whisperCount}`);
+  console.log(`AssemblyAI segments: ${assemblyaiCount}`);
+}
+
+// System monitoring functions (reused from original)
 function updateSystemMonitor(stats) {
   // Update current values
   elements.cpuValue.textContent = `${stats.cpu.usage.toFixed(1)}%`;

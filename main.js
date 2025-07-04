@@ -3,6 +3,10 @@ const path = require('path');
 const AudioCapture = require('./audio-capture');
 const SystemMonitor = require('./system-monitor');
 const TranscriptionWorker = require('./transcription-worker');
+const AssemblyAIService = require('./assemblyai-service');
+const RecordingManager = require('./recording-manager');
+const TranscriptStorage = require('./transcript-storage');
+const config = require('./config');
 
 // Disable sandbox for testing (not recommended for production)
 app.commandLine.appendSwitch('no-sandbox');
@@ -11,12 +15,20 @@ let mainWindow;
 let audioCapture;
 let systemMonitor;
 let transcriptionWorker;
-let isTranscribing = false;
+let assemblyAIService;
+let recordingManager;
+let transcriptStorage;
+
+// State management
+let isRecording = false;
+let currentSession = null;
+let whisperModel = 'tiny.en';
+let assemblyaiModel = 'best';
 
 function createWindow() {
   mainWindow = new BrowserWindow({
-    width: 1200,
-    height: 800,
+    width: 1400,
+    height: 900,
     webPreferences: {
       nodeIntegration: true,
       contextIsolation: false
@@ -25,14 +37,133 @@ function createWindow() {
   
   mainWindow.loadFile('renderer.html');
   
-  // Initialize components
-  audioCapture = new AudioCapture();
-  systemMonitor = new SystemMonitor();
-  transcriptionWorker = new TranscriptionWorker();
+  // Initialize all services
+  initializeServices();
   
   // Request permissions and start monitoring
   requestPermissions();
   startSystemMonitoring();
+}
+
+function initializeServices() {
+  console.log('=== INITIALIZING DUAL TRANSCRIPTION SERVICES ===');
+  
+  // Initialize core services
+  audioCapture = new AudioCapture();
+  systemMonitor = new SystemMonitor();
+  transcriptionWorker = new TranscriptionWorker();
+  assemblyAIService = new AssemblyAIService();
+  recordingManager = new RecordingManager();
+  transcriptStorage = new TranscriptStorage();
+  
+  // Set up service event handlers
+  setupServiceEventHandlers();
+  
+  console.log('Configuration:', {
+    assemblyAIConfigured: config.isAssemblyAIConfigured(),
+    recordingPath: config.app.recordingSavePath,
+    transcriptPath: config.app.transcriptSavePath
+  });
+}
+
+function setupServiceEventHandlers() {
+  // Whisper transcription results
+  transcriptionWorker.onTranscriptionResult((result) => {
+    // Add to transcript storage
+    transcriptStorage.addWhisperTranscript({
+      text: result.text,
+      confidence: result.confidence,
+      type: 'final',
+      model: whisperModel,
+      latency: result.processingTime ? result.processingTime * 1000 : null,
+      metadata: result
+    });
+    
+    // Send to renderer
+    mainWindow.webContents.send('whisper-transcription', {
+      ...result,
+      model: whisperModel,
+      timestamp: Date.now()
+    });
+  });
+  
+  // AssemblyAI event handlers
+  assemblyAIService.on('partialTranscript', (result) => {
+    mainWindow.webContents.send('assemblyai-transcription', {
+      ...result,
+      type: 'partial',
+      model: assemblyaiModel
+    });
+  });
+  
+  assemblyAIService.on('finalTranscript', (result) => {
+    // Add to transcript storage
+    transcriptStorage.addAssemblyAITranscript({
+      text: result.text,
+      confidence: result.confidence,
+      type: 'final',
+      model: assemblyaiModel,
+      latency: result.latency,
+      messageId: result.messageId,
+      words: result.words,
+      metadata: result
+    });
+    
+    // Send to renderer
+    mainWindow.webContents.send('assemblyai-transcription', {
+      ...result,
+      type: 'final',
+      model: assemblyaiModel
+    });
+  });
+  
+  assemblyAIService.on('status', (status) => {
+    mainWindow.webContents.send('assemblyai-status', { status });
+  });
+  
+  assemblyAIService.on('error', (error) => {
+    console.error('AssemblyAI error:', error);
+    transcriptStorage.addError('assemblyai', error);
+    mainWindow.webContents.send('error', { service: 'assemblyai', error });
+  });
+  
+  // Recording manager events
+  recordingManager.on('recordingStarted', (info) => {
+    console.log('Recording started:', info.filename);
+    transcriptStorage.setRecordingFile(info.filename);
+    mainWindow.webContents.send('recording-status', { 
+      status: 'started', 
+      filename: info.filename 
+    });
+  });
+  
+  recordingManager.on('recordingStopped', (info) => {
+    console.log('Recording stopped:', info.filename);
+    console.log('Duration:', (info.duration / 1000).toFixed(2), 'seconds');
+    console.log('File size:', (info.fileSize / 1024 / 1024).toFixed(2), 'MB');
+    
+    mainWindow.webContents.send('recording-status', { 
+      status: 'stopped', 
+      info 
+    });
+  });
+  
+  recordingManager.on('error', (error) => {
+    console.error('Recording error:', error);
+    transcriptStorage.addError('recording', error);
+    mainWindow.webContents.send('error', { service: 'recording', error });
+  });
+  
+  // Transcript storage events
+  transcriptStorage.on('sessionStarted', (info) => {
+    console.log('Transcript session started:', info.sessionId);
+    mainWindow.webContents.send('session-started', info);
+  });
+  
+  transcriptStorage.on('sessionEnded', (info) => {
+    console.log('Transcript session ended:', info.sessionId);
+    mainWindow.webContents.send('session-ended', info);
+  });
 }
 
 async function requestPermissions() {
@@ -66,11 +197,20 @@ function startSystemMonitoring() {
 
 app.whenReady().then(createWindow);
 
-// IPC handlers for live transcription
-ipcMain.handle('start-transcription', async (event, selectedModel) => {
+// IPC handlers for dual transcription
+ipcMain.handle('start-dual-transcription', async (event, options) => {
   try {
-    console.log('=== STARTING LIVE TRANSCRIPTION ===');
-    console.log('Selected model:', selectedModel);
+    console.log('=== STARTING DUAL TRANSCRIPTION ===');
+    console.log('Options:', options);
+    
+    // Validate configuration
+    const configValidation = config.validateConfig();
+    if (!configValidation.isValid) {
+      return { 
+        success: false, 
+        error: `Configuration error: ${configValidation.issues.join(', ')}` 
+      };
+    }
     
     // Check permissions
     const micStatus = systemPreferences.getMediaAccessStatus('microphone');
@@ -81,97 +221,161 @@ ipcMain.handle('start-transcription', async (event, selectedModel) => {
       return { success: false, error: 'Microphone permission required' };
     }
     
-    // Initialize transcription worker with selected model
-    await transcriptionWorker.initialize(selectedModel);
+    // Update models
+    whisperModel = options.whisperModel || whisperModel;
+    assemblyaiModel = options.assemblyaiModel || assemblyaiModel;
     
-    // Start audio capture with streaming
+    // Start transcript session
+    const sessionId = transcriptStorage.startSession();
+    transcriptStorage.setModels(whisperModel, assemblyaiModel);
+    currentSession = { sessionId, startTime: Date.now() };
+    
+    // Initialize Whisper transcription worker
+    console.log('Initializing Whisper with model:', whisperModel);
+    await transcriptionWorker.initialize(whisperModel);
+    mainWindow.webContents.send('whisper-status', { status: 'ready' });
+    
+    // Initialize AssemblyAI connection
+    console.log('Connecting to AssemblyAI with model:', assemblyaiModel);
+    assemblyAIService.setModel(assemblyaiModel);
+    await assemblyAIService.connect();
+    
+    // Start WAV recording
+    console.log('Starting WAV recording...');
+    recordingManager.startRecording();
+    
+    // Start audio capture with dual streaming
     const result = audioCapture.startStreaming((audioChunk) => {
-      // Send audio chunk to transcription worker
-      transcriptionWorker.processAudioChunk(audioChunk);
+      try {
+        // Send to Whisper
+        transcriptionWorker.processAudioChunk(audioChunk);
+        
+        // Send to recording
+        recordingManager.addAudioData(audioChunk);
+        
+        // Convert and send to AssemblyAI
+        if (assemblyAIService.isConnected) {
+          // Convert Float32Array to PCM16 for AssemblyAI
+          const pcmData = AssemblyAIService.convertAudioFormat(audioChunk, 'float32', 'int16');
+          assemblyAIService.sendAudio(pcmData);
+        }
+      } catch (error) {
+        console.error('Error processing audio chunk:', error);
+      }
     });
     
     if (result) {
-      isTranscribing = true;
+      isRecording = true;
       
-      // Set up transcription result handler
-      transcriptionWorker.onTranscriptionResult((transcriptionData) => {
-        mainWindow.webContents.send('transcription-result', transcriptionData);
-      });
+      // Start AssemblyAI recording
+      assemblyAIService.startRecording();
       
-      return { success: true, model: selectedModel };
+      console.log('Dual transcription started successfully');
+      return { 
+        success: true, 
+        sessionId: sessionId,
+        whisperModel: whisperModel,
+        assemblyaiModel: assemblyaiModel
+      };
     } else {
       return { success: false, error: 'Failed to start audio capture' };
     }
   } catch (error) {
-    console.error('Transcription start error:', error);
+    console.error('Dual transcription start error:', error);
     return { success: false, error: error.message };
   }
 });
 
-ipcMain.handle('stop-transcription', async () => {
+ipcMain.handle('stop-dual-transcription', async () => {
   try {
-    console.log('=== STOPPING LIVE TRANSCRIPTION ===');
+    console.log('=== STOPPING DUAL TRANSCRIPTION ===');
     
+    // Stop audio capture
     if (audioCapture) {
       audioCapture.stopStreaming();
     }
     
+    // Stop Whisper transcription
     if (transcriptionWorker) {
       await transcriptionWorker.stop();
+      mainWindow.webContents.send('whisper-status', { status: 'ready' });
     }
     
-    isTranscribing = false;
-    return { success: true };
+    // Stop AssemblyAI recording and disconnect
+    if (assemblyAIService) {
+      assemblyAIService.stopRecording();
+      // Keep connection open for potential future use
+    }
+    
+    // Stop WAV recording
+    const recordingInfo = recordingManager.stopRecording();
+    
+    // End transcript session
+    const sessionInfo = transcriptStorage.endSession();
+    
+    isRecording = false;
+    const endTime = Date.now();
+    
+    if (currentSession) {
+      currentSession.endTime = endTime;
+      currentSession.duration = endTime - currentSession.startTime;
+    }
+    
+    console.log('Dual transcription stopped successfully');
+    console.log('Session duration:', currentSession ? (currentSession.duration / 1000).toFixed(2) + 's' : 'N/A');
+    
+    return { 
+      success: true, 
+      sessionInfo: sessionInfo,
+      recordingInfo: recordingInfo,
+      duration: currentSession ? currentSession.duration : 0
+    };
   } catch (error) {
-    console.error('Stop transcription error:', error);
+    console.error('Stop dual transcription error:', error);
     return { success: false, error: error.message };
   }
 });
 
-ipcMain.handle('switch-model', async (event, newModel) => {
+ipcMain.handle('switch-whisper-model', async (event, newModel) => {
   try {
-    console.log('=== SWITCHING MODEL ===');
+    console.log('=== SWITCHING WHISPER MODEL ===');
     console.log('New model:', newModel);
     
-    // Stop current transcription if running
-    if (isTranscribing) {
-      audioCapture.stopStreaming();
-    }
+    whisperModel = newModel;
+    transcriptStorage.setModels(whisperModel, assemblyaiModel);
     
-    // Switch model
-    await transcriptionWorker.switchModel(newModel);
-    
-    // Restart transcription if it was running
-    if (isTranscribing) {
-      audioCapture.startStreaming((audioChunk) => {
-        transcriptionWorker.processAudioChunk(audioChunk);
-      });
+    if (isRecording) {
+      mainWindow.webContents.send('whisper-status', { status: 'loading' });
+      await transcriptionWorker.switchModel(newModel);
+      mainWindow.webContents.send('whisper-status', { status: 'transcribing' });
     }
     
     return { success: true, model: newModel };
   } catch (error) {
-    console.error('Model switch error:', error);
+    console.error('Whisper model switch error:', error);
+    mainWindow.webContents.send('whisper-status', { status: 'error' });
     return { success: false, error: error.message };
   }
 });
 
-ipcMain.handle('get-available-models', async () => {
-  return {
-    models: [
-      { id: 'tiny.en', name: 'Tiny (English)', size: '~39MB', speed: 'Fastest', accuracy: 'Basic' },
-      { id: 'tiny', name: 'Tiny (Multilingual)', size: '~39MB', speed: 'Fastest', accuracy: 'Basic' },
-      { id: 'base.en', name: 'Base (English)', size: '~74MB', speed: 'Fast', accuracy: 'Good' },
-      { id: 'base', name: 'Base (Multilingual)', size: '~74MB', speed: 'Fast', accuracy: 'Good' },
-      { id: 'small.en', name: 'Small (English)', size: '~244MB', speed: 'Medium', accuracy: 'Better' },
-      { id: 'small', name: 'Small (Multilingual)', size: '~244MB', speed: 'Medium', accuracy: 'Better' },
-      { id: 'medium.en', name: 'Medium (English)', size: '~769MB', speed: 'Slow', accuracy: 'Very Good' },
-      { id: 'medium', name: 'Medium (Multilingual)', size: '~769MB', speed: 'Slow', accuracy: 'Very Good' },
-      { id: 'large-v3', name: 'Large v3 (Multilingual)', size: '~1550MB', speed: 'Slowest', accuracy: 'Excellent' }
-    ]
-  };
+ipcMain.handle('switch-assemblyai-model', async (event, newModel) => {
+  try {
+    console.log('=== SWITCHING ASSEMBLYAI MODEL ===');
+    console.log('New model:', newModel);
+    
+    assemblyaiModel = newModel;
+    transcriptStorage.setModels(whisperModel, assemblyaiModel);
+    
+    assemblyAIService.setModel(newModel);
+    
+    return { success: true, model: newModel };
+  } catch (error) {
+    console.error('AssemblyAI model switch error:', error);
+    return { success: false, error: error.message };
+  }
 });
 
-// Add permission check IPC handler
+// Existing IPC handlers (permissions, system info)
 ipcMain.handle('check-permissions', async () => {
   const micStatus = systemPreferences.getMediaAccessStatus('microphone');
   const screenStatus = systemPreferences.getMediaAccessStatus('screen');
@@ -182,18 +386,67 @@ ipcMain.handle('check-permissions', async () => {
   };
 });
 
-// Handle system resource requests
 ipcMain.handle('get-system-info', async () => {
   return systemMonitor.getSystemInfo();
 });
 
+// Session management handlers
+ipcMain.handle('get-session-list', async () => {
+  return transcriptStorage.listSessions();
+});
+
+ipcMain.handle('export-session', async (event, sessionId, format) => {
+  return transcriptStorage.exportSession(sessionId, format);
+});
+
+ipcMain.handle('delete-session', async (event, sessionId) => {
+  return transcriptStorage.deleteSession(sessionId);
+});
+
+// Recording management handlers
+ipcMain.handle('get-recording-list', async () => {
+  return recordingManager.listRecordings();
+});
+
+ipcMain.handle('delete-recording', async (event, filename) => {
+  return recordingManager.deleteRecording(filename);
+});
+
+// Configuration handlers
+ipcMain.handle('get-config', async () => {
+  return {
+    assemblyAIConfigured: config.isAssemblyAIConfigured(),
+    whisperModels: config.whisper.models,
+    assemblyAIModels: config.assemblyAIModels,
+    validation: config.validateConfig()
+  };
+});
+
+// Cleanup on app exit
 app.on('window-all-closed', () => {
+  console.log('=== APPLICATION CLOSING ===');
+  
+  // Stop all services
   if (systemMonitor) {
     systemMonitor.stop();
   }
+  
   if (transcriptionWorker) {
     transcriptionWorker.cleanup();
   }
+  
+  if (assemblyAIService) {
+    assemblyAIService.disconnect();
+  }
+  
+  if (recordingManager && isRecording) {
+    recordingManager.stopRecording();
+  }
+  
+  if (transcriptStorage && currentSession) {
+    transcriptStorage.endSession();
+  }
+  
   if (process.platform !== 'darwin') {
     app.quit();
   }
@@ -202,5 +455,26 @@ app.on('window-all-closed', () => {
 app.on('activate', () => {
   if (BrowserWindow.getAllWindows().length === 0) {
     createWindow();
+  }
+});
+
+// Handle unexpected errors
+process.on('uncaughtException', (error) => {
+  console.error('Uncaught exception:', error);
+  if (mainWindow) {
+    mainWindow.webContents.send('error', { 
+      service: 'system', 
+      error: { message: error.message, stack: error.stack } 
+    });
+  }
+});
+
+process.on('unhandledRejection', (reason, promise) => {
+  console.error('Unhandled rejection at:', promise, 'reason:', reason);
+  if (mainWindow) {
+    mainWindow.webContents.send('error', { 
+      service: 'system', 
+      error: { message: reason.toString() } 
+    });
   }
 });
